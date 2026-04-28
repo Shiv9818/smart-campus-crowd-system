@@ -77,7 +77,7 @@ function App() {
   const sharedProps = {
     location, setLocation,
     mode, setMode: updateMode,
-    crowdData, historicalStats,
+    crowdData,
     loading,
   };
 
