@@ -8,7 +8,7 @@ import PredictionPage from './pages/PredictionPage';
 import AboutPage from './pages/AboutPage';
 import './styles.css';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://smart-campus-backend-azf3.onrender.com/api';
 
 function App() {
   const [location, setLocation] = useState('Library');
@@ -46,7 +46,7 @@ function App() {
   const updateMode = async (newMode) => {
     try {
       console.log(`[Mode Switch] Switching to ${newMode}`);
-      await axios.post(`${API_BASE_URL}/mode/${newMode.toLowerCase()}`);
+      await axios.post(`${API_BASE_URL}/mode/${newMode.toLowerCase()}?location=${encodeURIComponent(location)}`);
       setMode(newMode);
     } catch (error) {
       console.error('Error updating mode:', error);
