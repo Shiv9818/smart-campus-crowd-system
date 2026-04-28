@@ -14,7 +14,6 @@ function App() {
   const [location, setLocation] = useState('Library');
   const [mode, setMode] = useState('SIMULATED');
   const [crowdData, setCrowdData] = useState(null);
-  const [historicalStats, setHistoricalStats] = useState(null);
 
   const [loading, setLoading] = useState(true);
 
