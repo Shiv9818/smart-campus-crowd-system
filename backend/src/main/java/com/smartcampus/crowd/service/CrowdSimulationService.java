@@ -2,7 +2,6 @@ package com.smartcampus.crowd.service;
 
 import com.smartcampus.crowd.model.CrowdData;
 import com.smartcampus.crowd.repository.CrowdRepository;
-import com.smartcampus.crowd.util.SimulationRangeModel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,18 +11,10 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Optimised simulation engine — two-tier data strategy:
- *
- *  Tier 1 (every 15 s):  Update in-memory currentCrowdMap only.
- *                         NO database write.
- *
- *  Tier 2 (every 10 min): Compute average of buffered values per location.
- *                          Write ONE aggregated row to DB with source="Simulated".
- *                          Clear buffer.
- *
- * This reduces DB writes from ~240/hour (15 s × 3 locations) to just 3/hour.
+ * definitive Simulation Engine: Time-based base + controlled variation.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,127 +25,141 @@ public class CrowdSimulationService {
     private final SystemModeService modeService;
 
     private static final Random RANDOM = new Random();
+    private static final int WINDOW_SIZE = 3;
+    private static final int TREND_THRESHOLD = 1;
 
-    /**
-     * In-memory store: location → latest crowd count.
-     * Read by CrowdService to serve API responses instantly without a DB query.
-     */
     @Getter
     private final Map<String, Integer> currentCrowdMap = new ConcurrentHashMap<>();
 
-    /**
-     * Rolling buffer: location → list of recent raw counts (up to 40 values per location).
-     * Averaged and flushed to DB every 10 minutes by aggregateToDB().
-     */
-    private final Map<String, List<Integer>> tempStorage = new ConcurrentHashMap<>();
+    private final Map<String, LinkedList<Integer>> rollingWindows = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> aggregationSum = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> aggregationCount = new ConcurrentHashMap<>();
 
-    // ── Tier 1: 15-second in-memory tick ────────────────────────────────────
+    // ── Tier 1: 15-second simulation (Smooth Controlled Variation) ──────────
 
     @Scheduled(fixedRate = 15_000)
     public void simulateCrowd() {
         if (!"SIMULATED".equals(modeService.getCurrentMode())) return;
-
-        LocalDateTime now = LocalDateTime.now();
-        SimulationRangeModel.RANGES.keySet().forEach(location ->
-                simulateForLocation(location, now));
+        
+        int hour = LocalDateTime.now().getHour();
+        List.of("Library", "Canteen", "Fees Office").forEach(loc -> generateForLocation(loc, hour));
     }
 
-    private void simulateForLocation(String location, LocalDateTime now) {
-        int hour = now.getHour();
+    private void generateForLocation(String location, int hour) {
+        int base = getBaseValue(location, hour);
+        int previous = currentCrowdMap.getOrDefault(location, base);
+        
+        // 1. Controlled Variation: previous + small change (-3 to +3)
+        int change = RANDOM.nextInt(7) - 3;
+        int variationValue = previous + change;
 
-        // Previous in-memory value (or DB fallback on first tick)
-        int currentCrowd = currentCrowdMap.computeIfAbsent(location, loc ->
-                crowdRepository.findTopByLocationAndSourceOrderByTimestampDesc(loc, "Simulated")
-                               .map(CrowdData::getCrowdCount)
-                               .orElse(20));
+        // 2. Combine with base influence (gravitate slightly towards base to prevent drifting too far)
+        // newValue = (0.7 * variation) + (0.3 * base)
+        int nextValue = (int) Math.round((variationValue * 0.7) + (base * 0.3));
 
-        SimulationRangeModel.Range range = SimulationRangeModel.getRangeForHour(location, hour);
-        int center = (range.min() + range.max()) / 2;
+        // 3. Apply Constraints
+        int finalValue = nextValue;
+        if ("Fees Office".equals(location)) {
+            finalValue = Math.max(5, Math.min(40, nextValue)); // Max 40
+        } else if ("Canteen".equals(location)) {
+            finalValue = Math.max(20, Math.min(120, nextValue)); // Min 20
+        } else {
+            finalValue = Math.max(5, Math.min(120, nextValue));
+        }
 
-        int direction;
-        if      (currentCrowd <= range.min()) direction =  1;
-        else if (currentCrowd >= range.max()) direction = -1;
-        else if (currentCrowd <  center)      direction =  1;
-        else if (currentCrowd >  center)      direction = -1;
-        else                                  direction = RANDOM.nextBoolean() ? 1 : -1;
+        currentCrowdMap.put(location, finalValue);
 
-        int magnitude   = RANDOM.nextBoolean() ? 1 : 2;
-        int finalCrowd  = Math.max(range.min(),
-                          Math.min(range.max(), currentCrowd + direction * magnitude));
+        // 4. Update Trend Window
+        rollingWindows.computeIfAbsent(location, k -> new LinkedList<>());
+        LinkedList<Integer> window = rollingWindows.get(location);
+        synchronized (window) {
+            window.add(finalValue);
+            if (window.size() > WINDOW_SIZE) window.removeFirst();
+        }
 
-        // Update in-memory map — NO DB write here
-        currentCrowdMap.put(location, finalCrowd);
+        // 5. Update Hourly Aggregation
+        aggregationSum.computeIfAbsent(location, k -> new AtomicInteger(0)).addAndGet(finalValue);
+        aggregationCount.computeIfAbsent(location, k -> new AtomicInteger(0)).incrementAndGet();
 
-        // Append to rolling buffer (cap at 40 to bound memory)
-        tempStorage.computeIfAbsent(location, k -> Collections.synchronizedList(new ArrayList<>()))
-                   .add(finalCrowd);
-
-        List<Integer> buf = tempStorage.get(location);
-        if (buf.size() > 40) buf.remove(0);
-
-        log.debug("[Sim] {} → crowd={} (in-memory only, buffer size={})",
-                location, finalCrowd, buf.size());
+        log.debug("[Sim] {} -> {} (base={}, hour={})", location, finalValue, base, hour);
     }
 
-    // ── Tier 2: 10-minute aggregation + DB persist ───────────────────────────
-
-    /**
-     * Every 10 minutes: average the buffer, save one row per location to DB.
-     * Uses fixedDelay so the 10-min clock starts AFTER the previous write finishes.
-     */
-    @Scheduled(fixedDelay = 600_000, initialDelay = 600_000)
-    public void aggregateToDB() {
-        if (!"SIMULATED".equals(modeService.getCurrentMode())) return;
-
-        log.info("[Aggregation] Flushing 10-minute averages to DB...");
-        LocalDateTime now = LocalDateTime.now();
-
-        tempStorage.forEach((location, values) -> {
-            if (values.isEmpty()) return;
-
-            List<Integer> snapshot;
-            synchronized (values) {
-                snapshot = new ArrayList<>(values);
-                values.clear();
-            }
-
-            int avg = (int) Math.round(snapshot.stream()
-                                                .mapToInt(Integer::intValue)
-                                                .average()
-                                                .orElse(0));
-
-            CrowdData aggregated = CrowdData.builder()
-                    .location(location)
-                    .crowdCount(avg)
-                    .status(calculateStatus(avg))
-                    .source("Simulated")
-                    .timestamp(now)
-                    .build();
-
-            crowdRepository.save(aggregated);
-            log.info("[Aggregation] {} → avg={} saved (from {} samples)", location, avg, snapshot.size());
-        });
-    }
-
-    // ── Daily cleanup: delete Simulated rows older than 7 days ───────────────
-
-    /**
-     * Runs once per day at 02:00 AM.
-     * Deletes old "Simulated" rows to prevent unbounded table growth.
-     * "Historical" rows (seeded 30-day baseline) are NEVER deleted.
-     */
-    @Scheduled(cron = "0 0 2 * * *")
-    public void cleanupOldSimulatedData() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
-        List<CrowdData> old = crowdRepository.findSimulatedOlderThan(cutoff);
-        if (!old.isEmpty()) {
-            crowdRepository.deleteAll(old);
-            log.info("[Cleanup] Deleted {} old Simulated rows (older than 7 days)", old.size());
+    private int getBaseValue(String location, int hour) {
+        switch (location) {
+            case "Library":
+                if (hour >= 9 && hour <= 11) return 70; // Morning High
+                if (hour >= 12 && hour <= 14) return 50; // Afternoon Medium
+                if (hour >= 15 && hour <= 17) return 85; // Evening High
+                return 15;
+            case "Canteen":
+                if (hour >= 12 && hour <= 14) return 95; // Lunch Peak
+                if (hour >= 15 && hour <= 17) return 50; // Evening Moderate
+                if (hour >= 9 && hour <= 11)  return 30; // Morning Low
+                return 20;
+            case "Fees Office":
+                if (hour >= 9 && hour <= 17) return 30; // Steady Day
+                return 10;
+            default:
+                return 25;
         }
     }
 
+    // ── Trend Logic (3-Point In-Memory) ──────────────────────────────────────
+
+    public String getLiveTrend(String location) {
+        LinkedList<Integer> window = rollingWindows.get(location);
+        if (window == null || window.size() < 3) return "Stable";
+
+        List<Integer> snapshot;
+        synchronized (window) { snapshot = new ArrayList<>(window); }
+
+        int c1 = snapshot.get(0); // oldest
+        int c3 = snapshot.get(2); // latest
+        int delta = c3 - c1;
+
+        if (delta > TREND_THRESHOLD)  return "Increasing";
+        if (delta < -TREND_THRESHOLD) return "Decreasing";
+        return "Stable";
+    }
+
+    // ── Prediction Logic (Trend-based) ───────────────────────────────────────
+
+    public int getLivePrediction(String location) {
+        LinkedList<Integer> window = rollingWindows.get(location);
+        if (window == null || window.size() < 2) return currentCrowdMap.getOrDefault(location, 20);
+
+        List<Integer> snapshot;
+        synchronized (window) { snapshot = new ArrayList<>(window); }
+        
+        int current = snapshot.get(snapshot.size() - 1);
+        int previous = snapshot.get(snapshot.size() - 2);
+        
+        int trend = current - previous;
+        int predicted = current + trend;
+        
+        return Math.max(0, Math.min(120, predicted));
+    }
+
+    // ── Hourly Aggregation (DB Write) ────────────────────────────────────────
+
+    @Scheduled(fixedRate = 3_600_000, initialDelay = 3_600_000)
+    public void aggregateToDB() {
+        if (!"SIMULATED".equals(modeService.getCurrentMode())) return;
+        LocalDateTime now = LocalDateTime.now();
+        aggregationSum.keySet().forEach(location -> {
+            int sum = aggregationSum.get(location).getAndSet(0);
+            int count = aggregationCount.get(location).getAndSet(0);
+            if (count > 0) {
+                crowdRepository.save(CrowdData.builder()
+                        .location(location).crowdCount(Math.round((float) sum / count))
+                        .status(calculateStatus(sum/count)).source("Simulated")
+                        .timestamp(now).build());
+            }
+        });
+    }
+
     private String calculateStatus(int count) {
-        if (count < 40)  return "LOW";
+        if (count < 40) return "LOW";
         if (count <= 80) return "MEDIUM";
         return "HIGH";
     }

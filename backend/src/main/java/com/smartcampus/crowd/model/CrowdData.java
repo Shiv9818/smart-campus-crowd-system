@@ -26,7 +26,7 @@ public class CrowdData {
     private String status;
     
     @Column(nullable = false)
-    private String source; // Video or Historical
+    private String source; // Simulated or Historical
     
     @Column(nullable = false)
     private LocalDateTime timestamp;

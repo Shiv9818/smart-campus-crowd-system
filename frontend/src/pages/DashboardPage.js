@@ -3,7 +3,7 @@ import LocationSelector from '../components/LocationSelector';
 import ModeSelector from '../components/ModeSelector';
 import StatsCard from '../components/StatsCard';
 import SystemInfo from '../components/SystemInfo';
-import TrendChart from '../components/TrendChart';
+
 import { Users, Activity, TrendingUp, Clock, Zap, Timer } from 'lucide-react';
 
 const DashboardPage = ({
@@ -12,6 +12,20 @@ const DashboardPage = ({
   crowdData, historicalStats,
   historyData, loading
 }) => {
+  // Multi-level Trend Logic
+  const getDynamicTrend = () => {
+    if (!crowdData || crowdData.prevCount === undefined) return crowdData?.trend || 'Stable';
+    const delta = crowdData.count - crowdData.prevCount;
+    
+    if (delta >= 5) return 'Strongly Increasing';
+    if (delta >= 2) return 'Increasing';
+    if (delta <= -5) return 'Strongly Decreasing';
+    if (delta <= -2) return 'Decreasing';
+    return 'Stable';
+  };
+
+  const trendValue = getDynamicTrend();
+
   return (
     <div className="page dashboard-page">
 
@@ -36,7 +50,8 @@ const DashboardPage = ({
         />
         <StatsCard
           label="Trend"
-          value={crowdData?.trend ?? '...'}
+          value={trendValue}
+          isTrend={true}
           icon={<TrendingUp size={20} />}
         />
         <StatsCard
@@ -56,8 +71,7 @@ const DashboardPage = ({
         />
       </div>
 
-      {/* Historical Trend Chart */}
-      <TrendChart location={location} />
+
 
       {/* System Info */}
       <SystemInfo mode={mode} />

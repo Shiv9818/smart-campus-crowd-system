@@ -8,9 +8,7 @@ import com.smartcampus.crowd.service.SystemModeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+
 
 @RestController
 @RequestMapping("/api/crowd")
@@ -35,24 +33,7 @@ public class CrowdController {
         return crowdService.getCurrentData(location);
     }
 
-    @GetMapping("/historical")
-    public CrowdResponse getHistorical(@RequestParam String location) {
-        return crowdService.getHistoricalAnalytics(location);
-    }
 
-    @GetMapping("/history")
-    public Map<String, List<?>> getHistory(@RequestParam String location) {
-        List<CrowdData> history = crowdService.getHistory(location);
-        return Map.of(
-            "times", history.stream().map(d -> d.getTimestamp().toString()).collect(Collectors.toList()),
-            "counts", history.stream().map(CrowdData::getCrowdCount).collect(Collectors.toList())
-        );
-    }
-
-    @GetMapping("/trend")
-    public List<Map<String, Object>> getTrend(@RequestParam String location) {
-        return crowdService.getHistoricalHourlyTrend(location);
-    }
 
     @GetMapping("/best-time")
     public String getBestTime(@RequestParam String location) {

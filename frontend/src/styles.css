@@ -1081,3 +1081,17 @@ body::before {
   .stats-grid { grid-template-columns: 1fr; }
   .stat-value { font-size: 1.6rem; }
 }
+/* ─── Trend-specific Status Colors ────────────────────────────────────────── */
+.trend-strongly-increasing { color: var(--success); font-weight: 800; filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.4)); }
+.trend-increasing { color: var(--success); opacity: 0.85; }
+.trend-stable { color: var(--text-muted); }
+.trend-decreasing { color: var(--danger); opacity: 0.85; }
+.trend-strongly-decreasing { color: var(--danger); font-weight: 800; filter: drop-shadow(0 0 8px rgba(244, 63, 148, 0.4)); }
+
+.trend-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.5rem;
+  transition: transform 0.3s ease;
+}

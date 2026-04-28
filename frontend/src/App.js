@@ -15,29 +15,33 @@ function App() {
   const [mode, setMode] = useState('SIMULATED');
   const [crowdData, setCrowdData] = useState(null);
   const [historicalStats, setHistoricalStats] = useState(null);
-  const [historyData, setHistoryData] = useState([]);
+
   const [loading, setLoading] = useState(true);
 
   const fetchAllData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
       const encodedLocation = encodeURIComponent(location);
-      const [mainRes, historyRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/crowd/current?location=${encodedLocation}`),
-        axios.get(`${API_BASE_URL}/crowd/history?location=${encodedLocation}`)
-      ]);
+      const mainRes = await axios.get(`${API_BASE_URL}/crowd/current?location=${encodedLocation}`);
 
       if (isSilent) console.log("Polling...");
-      console.log("API response:", mainRes.data);
+      
+      // Store previous count for trend calculation
+      setCrowdData(prev => {
+        const newData = mainRes.data;
+        if (prev && prev.location === newData.location) {
+          newData.prevCount = prev.count;
+        }
+        return newData;
+      });
+      
 
-      setCrowdData(mainRes.data);
-      setHistoryData(historyRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
-  }, [location, mode]);
+  }, [location]);
 
   const updateMode = async (newMode) => {
     try {
@@ -75,7 +79,7 @@ function App() {
     location, setLocation,
     mode, setMode: updateMode,
     crowdData, historicalStats,
-    historyData, loading,
+    loading,
   };
 
   return (
