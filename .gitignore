@@ -34,3 +34,7 @@ logs/
 *.class
 *.jar
 !backend/.mvn/wrapper/maven-wrapper.jar
+
+
+dump_small.sql
+schema.sql
