@@ -74,7 +74,7 @@ const HomePage = () => {
       <section className="locations-strip">
         <h2 className="section-heading">Monitored Locations</h2>
         <div className="locations-row">
-          {['📚 Library', '🍽️ Canteen', '🏦 Fees Office'].map((loc) => (
+          {['Library', 'Canteen', 'Fees Office'].map((loc) => (
             <div className="location-chip" key={loc}>{loc}</div>
           ))}
         </div>

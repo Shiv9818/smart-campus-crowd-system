@@ -34,6 +34,20 @@ public class CrowdService {
     public CrowdResponse getCurrentData(String location) {
         String mode = modeService.getCurrentMode();
 
+        if ("LIVE".equals(mode)) {
+            return CrowdResponse.builder()
+                    .location(location)
+                    .count(0)
+                    .status("N/A")
+                    .trend("-")
+                    .bestTime(getBestTime(location))
+                    .prediction(getPrediction(location))
+                    .waitingTime(0)
+                    .lastUpdated(LocalDateTime.now())
+                    .source("Live")
+                    .build();
+        }
+
         if ("SIMULATED".equals(mode)) {
             Integer inMemoryCrowd = simulationService.getCurrentCrowdMap().get(location);
             
@@ -57,7 +71,7 @@ public class CrowdService {
                     .build();
         }
 
-        // Live mode fallback
+        // Default fallback
         return crowdRepository.findTopByLocationOrderByTimestampDesc(location)
                 .map(this::buildResponse)
                 .orElseGet(() -> buildWarmStartResponse(location));

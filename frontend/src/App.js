@@ -25,14 +25,7 @@ function App() {
 
       if (isSilent) console.log("Polling...");
       
-      // Store previous count for trend calculation
-      setCrowdData(prev => {
-        const newData = mainRes.data;
-        if (prev && prev.location === newData.location) {
-          newData.prevCount = prev.count;
-        }
-        return newData;
-      });
+      setCrowdData(mainRes.data);
       
 
     } catch (error) {

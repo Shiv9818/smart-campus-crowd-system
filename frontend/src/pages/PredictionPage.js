@@ -63,7 +63,7 @@ const PredictionPage = ({
         />
         <StatsCard
           label="Estimated Waiting Time"
-          value={crowdData ? `${crowdData.waitingTime} mins` : '...'}
+          value={crowdData ? (crowdData.waitingTime === 0 ? '--' : `${crowdData.waitingTime} mins`) : '...'}
           icon={<Timer size={20} />}
         />
         <StatsCard

@@ -12,19 +12,7 @@ const DashboardPage = ({
   crowdData, historicalStats,
   historyData, loading
 }) => {
-  // Multi-level Trend Logic
-  const getDynamicTrend = () => {
-    if (!crowdData || crowdData.prevCount === undefined) return crowdData?.trend || 'Stable';
-    const delta = crowdData.count - crowdData.prevCount;
-    
-    if (delta >= 5) return 'Strongly Increasing';
-    if (delta >= 2) return 'Increasing';
-    if (delta <= -5) return 'Strongly Decreasing';
-    if (delta <= -2) return 'Decreasing';
-    return 'Stable';
-  };
 
-  const trendValue = getDynamicTrend();
 
   return (
     <div className="page dashboard-page">
@@ -39,7 +27,7 @@ const DashboardPage = ({
       <div className="stats-grid">
         <StatsCard
           label="Current Crowd"
-          value={crowdData?.count ?? '...'}
+          value={crowdData ? (crowdData.count === 0 ? '--' : crowdData.count) : '...'}
           icon={<Users size={20} />}
         />
         <StatsCard
@@ -50,7 +38,7 @@ const DashboardPage = ({
         />
         <StatsCard
           label="Trend"
-          value={trendValue}
+          value={crowdData?.trend ?? '...'}
           isTrend={true}
           icon={<TrendingUp size={20} />}
         />
@@ -66,7 +54,7 @@ const DashboardPage = ({
         />
         <StatsCard
           label="Estimated Waiting Time"
-          value={crowdData ? `${crowdData.waitingTime} mins` : '...'}
+          value={crowdData ? (crowdData.waitingTime === 0 ? '--' : `${crowdData.waitingTime} mins`) : '...'}
           icon={<Timer size={20} />}
         />
       </div>
